@@ -411,4 +411,3 @@ class ScatterTrace_FFT extends Blank2DTrace {
     return outputFreq_Hz;
   }
 };
-

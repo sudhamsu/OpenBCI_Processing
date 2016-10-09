@@ -1034,7 +1034,3 @@ class HeadPlot {
   } //end of draw method
   
 };
-
-
-
-

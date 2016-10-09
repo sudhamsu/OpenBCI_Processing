@@ -1,18 +1,54 @@
 //import ddf.minim.analysis.*; //for FFT
-
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.URL;
 boolean drawUser = false; //if true... toggles on EEG_Processing_User.draw and toggles off the headplot in Gui_Manager
+
+
+public class sendHttp implements Runnable {
+
+    private int code;
+
+    public sendHttp(int var) {
+        this.code = var;
+    }
+
+    public void run() {
+        try {
+            URL url = new URL("http://72.19.96.34:3000/"+code);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Accept", "application/json");
+            conn.getResponseCode();
+            System.setProperty("http.keepAlive", "false");
+            conn.disconnect();
+        } catch (MalformedURLException e) {
+            //e.printStackTrace();
+        } catch (IOException e) {
+            //e.printStackTrace();
+        }
+    }
+}
+
 
 class EEG_Processing_User {
   private float fs_Hz;  //sample rate
   private int nchan;  
-  
+  private int callCount = 0;
+  private boolean eyeClosed = false;
+  //gloabl vatiabl for HTTP communication 
+  private long prevSentTime = 0;
   //add your own variables here
   boolean isTriggered = false;  //boolean to keep track of when the trigger condition is met
   float upperThreshold = 25;  //default uV upper threshold value ... this will automatically change over time
   float lowerThreshold = 0;  //default uV lower threshold value ... this will automatically change over time
   int averagePeriod = 250;  //number of data packets to average over (250 = 1 sec)
   int thresholdPeriod = 1250;  //number of packets
-  int ourChan = 3 - 1;  //channel being monitored ... "3 - 1" means channel 3 (with a 0 index)
+  int ourChan1 = 1 - 1;  //channel being monitored ... "3 - 1" means channel 3 (with a 0 index)1
+  int ourChan2 = 2 - 1;
   float myAverage = 0.0;   //this will change over time ... used for calculations below
   float acceptableLimitUV = 255;  //uV values above this limit are excluded, as a result of them almost certainly being noise...
   
@@ -25,9 +61,47 @@ class EEG_Processing_User {
   EEG_Processing_User(int NCHAN, float sample_rate_Hz) {
     nchan = NCHAN;
     fs_Hz = sample_rate_Hz;
+    //sendHTTP(1);
+    prevSentTime = System.currentTimeMillis();
   }
   
+  //private void sendHTTP(int code){
+  //    try {
+  //        if(System.currentTimeMillis() - prevSentTime > 6000){
+  //            URL url = new URL("http://72.19.96.34:3000/"+code);
+  //            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+  //            conn.setRequestMethod("GET");
+  //            conn.setRequestProperty("Accept", "application/json");
+  //            conn.setConnectTimeout(5000);
+  //            conn.getResponseCode();
+  //            prevSentTime = System.currentTimeMillis();
+  //            System.setProperty("http.keepAlive", "false");
+  //            conn.disconnect();
+  //        }
+  //    } catch (java.net.SocketTimeoutException e) {
+  //        e.printStackTrace();
+  //    } catch (MalformedURLException e) {
+  //        e.printStackTrace();
+  //    } catch (IOException e) {
+  //        e.printStackTrace();
+  //    }
+  //}
+  
   //add some functions here...if you'd like
+  private void lowPass(float[] chanData_forDisplay_uV, int begin){
+    // average out stuff from begin to begin+47
+    float[] averages = new float[averagePeriod];
+    for(int i = begin; i<begin+averagePeriod-2;i++) {
+      for(int j = i-2; j<i+3;j++){
+        averages[i-begin] += chanData_forDisplay_uV[j];
+      }
+      averages[i-begin] = averages[i-begin]/5;
+    }
+    for(int i = begin; i<begin+averagePeriod-2;i++) {
+      chanData_forDisplay_uV[i] = averages[i-begin];
+    }
+  }
+  
   
   //here is the processing routine called by the OpenBCI main program...update this with whatever you'd like to do
   public void process(float[][] data_newest_uV, //holds raw EEG data that is new since the last call
@@ -35,15 +109,20 @@ class EEG_Processing_User {
         float[][] data_forDisplay_uV, //this data has been filtered and is ready for plotting on the screen
         FFT[] fftData) {              //holds the FFT (frequency spectrum) of the latest data
 
+    int pointsPerUpdate = data_newest_uV[ourChan1].length;
+    callCount = callCount + 1;
     //for example, you could loop over each EEG channel to do some sort of time-domain processing 
     //using the sample values that have already been filtered, as will be plotted on the display
     float EEG_value_uV;
     
-    for(int i = data_forDisplay_uV[ourChan].length - averagePeriod; i < data_forDisplay_uV[ourChan].length; i++){
-       if(data_forDisplay_uV[ourChan][i] <= acceptableLimitUV){ //prevent BIG spikes from effecting the average
-         myAverage += abs(data_forDisplay_uV[ourChan][i]);  //add value to average ... we will soon divide by # of packets
+    for(int i = data_forDisplay_uV[ourChan1].length - averagePeriod; i < data_forDisplay_uV[ourChan1].length; i++){
+       if(data_forDisplay_uV[ourChan1][i] <= acceptableLimitUV){ //prevent BIG spikes from effecting the average
+         myAverage += abs(data_forDisplay_uV[ourChan1][i]);  //add value to average ... we will soon divide by # of packets
        }
     }
+    
+    //println("EEG_Processing User:" + millis() + "data_newest_uV = ");
+    //printArray(data_newest_uV[0]);
 
     myAverage = myAverage / float(averagePeriod); //finishing the average
     
@@ -72,6 +151,79 @@ class EEG_Processing_User {
     //trip the output to a value between 0-255
     if(output < 0) output = 0;
     if(output > 255) output = 255;
+    
+    // peak/valley detection
+    Boolean blink = false;
+    Boolean close = false;
+    Boolean open = false;
+    float extrema_threshold = 36; 
+    float maxima = 0;
+    int max_index = -1;
+    float minima = 0;
+    int min_index = -1;
+    
+    if(callCount%5==0){ // for every second
+    lowPass(data_forDisplay_uV[ourChan1], data_forDisplay_uV[ourChan1].length - averagePeriod);
+    for(int i = data_forDisplay_uV[ourChan1].length - averagePeriod; i < data_forDisplay_uV[ourChan1].length; i++){
+       if(abs(data_forDisplay_uV[ourChan1][i]) <= acceptableLimitUV){ //prevent BIG spikes from effecting the average
+           if(data_forDisplay_uV[ourChan1][i] > maxima && data_forDisplay_uV[ourChan1][i] > extrema_threshold){
+               maxima = data_forDisplay_uV[ourChan1][i];
+               max_index = i;
+           }
+           else if(data_forDisplay_uV[ourChan1][i] < minima && abs(data_forDisplay_uV[ourChan1][i]) > extrema_threshold){
+               minima = data_forDisplay_uV[ourChan1][i];
+               min_index = i;
+           }
+       }
+    }
+    if(max_index != -1 && min_index != -1 && !eyeClosed && (max_index-min_index<65) && (max_index-min_index>0)){
+      //check ifn magnitude is comparable
+      if(abs(abs(maxima) - abs(minima)) < 0.5*max(abs(maxima),abs(minima))){ //maybe change this value
+      blink = true;
+        println("BLINK BLINK BLINK BLINK BLINK BLINK BLINK BLINK");
+        println(maxima + "   " + minima);
+        
+        if(System.currentTimeMillis() - prevSentTime > 6000){
+            sendHttp sendHttpCall = new sendHttp(0);
+            Thread t = new Thread(sendHttpCall);
+            t.start();
+            prevSentTime = System.currentTimeMillis();
+        }
+      }
+    } 
+    if(min_index != -1 && !eyeClosed && !blink){ //close ONLY detection
+        //
+        if(max_index==-1||(max_index!=-1 && (abs(maxima)<0.65*abs(minima)) && (max_index-min_index>65) && (max_index-min_index>0))) {
+        close = true;
+        eyeClosed = true;
+        println("CLOSE CLOSE CLOSE CLOSE CLOSE CLOSE CLOSE CLOSE");
+        println(maxima + "   " + minima);
+        
+        if(System.currentTimeMillis() - prevSentTime > 6000){
+            sendHttp sendHttpCall = new sendHttp(1);
+            Thread t = new Thread(sendHttpCall);
+            t.start();
+            prevSentTime = System.currentTimeMillis();
+        }
+      }
+    } 
+    if(max_index != -1 && eyeClosed && !blink){ //open ONLY detection
+        //
+        if(min_index==-1||(min_index!=-1 && (abs(minima)<0.65*abs(maxima)))) {
+        open = true;
+        eyeClosed = false;
+        println("OPEN OPEN OPEN OPEN OPEN OPEN OPEN OPEN");
+        println(maxima + "   " + minima);
+        
+        if(System.currentTimeMillis() - prevSentTime > 6000){
+            sendHttp sendHttpCall = new sendHttp(2);
+            Thread t = new Thread(sendHttpCall);
+            t.start();
+            prevSentTime = System.currentTimeMillis();
+        }
+      }
+    }
+    callCount=0;}
     
     //attempt to write to serial_output. If this serial port does not exist, do nothing.
     try {

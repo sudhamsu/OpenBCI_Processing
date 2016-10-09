@@ -55,4 +55,3 @@ class HelpWidget {
 public void output(String _output) {
   helpWidget.output(_output);
 }
-

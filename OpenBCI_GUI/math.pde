@@ -163,4 +163,3 @@ class RunningMean {
     return mean(values);
   }
 };
-
