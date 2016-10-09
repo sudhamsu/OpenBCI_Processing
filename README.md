@@ -1,4 +1,4 @@
-This project is forked from OpenBCI/OpenBCI_Processing. The main aim of the project is to build upon the OpenBCI system to detect certain physical actions by a user and trigger response in another devices, like a Jibo robot.
+This project is forked from OpenBCI/OpenBCI_Processing. The main aim of the project is to build upon the OpenBCI system to detect certain physical actions by a user and trigger response in another devices, like a Jibo robot. The following README is from the original project to help you set up the enviroment.
 
 [![Stories in Ready](https://badge.waffle.io/OpenBCI/OpenBCI_Processing.png?label=ready&title=Ready)](https://waffle.io/OpenBCI/OpenBCI_Processing)
 For the full getting started guide, go to [our Docs page](http://docs.openbci.com/tutorials/01-GettingStarted).
